@@ -12,7 +12,6 @@ import java.util.Map;
 
 import org.joda.time.DateTime;
 
-import com.datastax.driver.core.ConsistencyLevel;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.querybuilder.Delete;
@@ -20,11 +19,24 @@ import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.datastax.driver.core.querybuilder.Select;
 import com.datastax.driver.core.querybuilder.Update;
 
+/**
+ * Class representing a distributed historic event counter, including several historic statistic
+ * indicators over event's values as means, deviations and variances.
+ * 
+ * @author apenya
+ * 
+ */
 public class Counter {
 
 	private Session session;
 	private String cfName;
 	private String name;
+
+	private static final com.datastax.driver.core.ConsistencyLevel DEFAULT_CONSISTENCY_LEVEL = com.datastax.driver.core.ConsistencyLevel.QUORUM;
+	private com.datastax.driver.core.ConsistencyLevel consistencyLevel = DEFAULT_CONSISTENCY_LEVEL;
+	
+	private static final boolean DEFAULT_SYNCHRONOUS_WRITES = true;
+	private boolean synchronousWrites = DEFAULT_SYNCHRONOUS_WRITES;
 
 	/**
 	 * Constructor.
@@ -49,11 +61,50 @@ public class Counter {
 	}
 
 	/**
+	 * Gets the identifying name.
 	 * 
-	 * @return
+	 * @return the identifying name
 	 */
 	public String getName() {
 		return name;
+	}
+
+	/**
+	 * Sets the consistency level to be used both writings and readings
+	 * 
+	 * @return the consistency level to be used both writings and readings
+	 */
+	public ConsistencyLevel getConsistencyLevel() {
+		return ConsistencyLevel.parseCQLDriverCL(consistencyLevel);
+	}
+
+	/**
+	 * Gets the consistency level to be used both writings and readings.
+	 * 
+	 * @param consistencyLevel the consistency level to be used both writings and readings to set
+	 */
+	public Counter setConsistencyLevel(ConsistencyLevel consistencyLevel) {
+		if (consistencyLevel == null)
+			throw new NullPointerException("Consistency level must be not null");
+		this.consistencyLevel = consistencyLevel.toCQLDriverCL();
+		return this;
+	}
+
+	/**
+	 * Return {@code true} if this is setup for synchronous writes, {@code false} otherwise.
+	 * @return {@code true} if this is setup for synchronous writes, {@code false} otherwise
+	 */
+	public boolean getSynchronousWrites() {
+		return synchronousWrites;
+	}
+
+	/**
+	 * Sets if writes must be synchronous
+	 * @param synchronousWrites if writes must be synchronous
+	 */
+	public Counter setSynchronousWrites(boolean synchronousWrites) {
+		this.synchronousWrites = synchronousWrites;
+		return this;
 	}
 
 	/**
@@ -98,14 +149,26 @@ public class Counter {
 			}
 		}
 		builder.append("APPLY BATCH;\n");
-		session.execute(builder.toString());
+		String query = builder.toString();
+		if (synchronousWrites) {
+			session.execute(query);
+		} else {
+			session.executeAsync(query);
+		}
 	}
 
-	private String update(ValueType type, TimeGranularity granularity, Date date, Long value) {
+	/**
+	 * Updates the value of this {@link Counter} using the specified value type, value and date.
+	 * 
+	 * @param valueType the type of the value to be updated
+	 * @param date the event's date
+	 * @param value the event's value for means, deviations and variances
+	 */
+	private String update(ValueType valueType, TimeGranularity granularity, Date date, Long value) {
 		Update update = QueryBuilder.update(cfName);
-		update.setConsistencyLevel(ConsistencyLevel.QUORUM);
+		update.setConsistencyLevel(consistencyLevel);
 		update.where(QueryBuilder.eq("name", name));
-		update.where(QueryBuilder.eq("type", type.getCode()));
+		update.where(QueryBuilder.eq("type", valueType.getCode()));
 		update.where(QueryBuilder.eq("granularity", granularity.getCode()));
 		update.where(QueryBuilder.eq("time", normalizeDate(granularity, date)));
 		update.with(QueryBuilder.incr("value", value));
@@ -119,9 +182,13 @@ public class Counter {
 	 */
 	public void delete() {
 		Delete delete = QueryBuilder.delete().from(cfName);
-		delete.setConsistencyLevel(ConsistencyLevel.QUORUM);
+		delete.setConsistencyLevel(consistencyLevel);
 		delete.where(QueryBuilder.eq("name", name));
-		session.execute(delete);
+		if (synchronousWrites) {
+			session.execute(delete);
+		} else {
+			session.executeAsync(delete);
+		}
 	}
 
 	/**
@@ -185,26 +252,26 @@ public class Counter {
 	 * Gets the map of value standard deviations by date for the specified time granularity and date
 	 * range.
 	 * 
-	 * @param granularity the time granularity
+	 * @param timeGranularity the time granularity
 	 * @param startDate the date range start, included
 	 * @param finishDate the date range finish, included
 	 * @return the map of value standard deviations by date for the specified time granularity and
 	 *         date range
 	 */
-	public Map<Date, Double> getDeviations(TimeGranularity granularity, Date startDate, Date finishDate) {
-		Map<Date, Double> counts = getCounts(granularity, startDate, finishDate);
-		Map<Date, Double> sums = getSums(granularity, startDate, finishDate);
-		Map<Date, Double> squares = getSquares(granularity, startDate, finishDate);
+	public Map<Date, Double> getDeviations(TimeGranularity timeGranularity, Date startDate, Date finishDate) {
+		Map<Date, Double> counts = getCounts(timeGranularity, startDate, finishDate);
+		Map<Date, Double> sums = getSums(timeGranularity, startDate, finishDate);
+		Map<Date, Double> squares = getSquares(timeGranularity, startDate, finishDate);
 		Map<Date, Double> deviations = new HashMap<Date, Double>(counts.size());
-		for (Date time : counts.keySet()) {
-			double count = counts.get(time);
-			double sum = sums.get(time);
-			double square = squares.get(time);
+		for (Date date : counts.keySet()) {
+			double count = counts.get(date);
+			double sum = sums.get(date);
+			double square = squares.get(date);
 			double deviation = 0.0;
 			if (count > 1) {
 				deviation = Math.sqrt((square - sum * sum / count) / (count - 1));
 			}
-			deviations.put(time, deviation);
+			deviations.put(date, deviation);
 		}
 		return deviations;
 	}
@@ -212,13 +279,13 @@ public class Counter {
 	/**
 	 * Gets the map of value variances by date for the specified time granularity and date range.
 	 * 
-	 * @param granularity the time granularity
+	 * @param timeGranularity the time granularity
 	 * @param startDate the date range start, included
 	 * @param finishDate the date range finish, included
 	 * @return the map of value variances by date for the specified time granularity and date range
 	 */
-	public Map<Date, Double> getVariances(TimeGranularity granularity, Date startDate, Date finishDate) {
-		Map<Date, Double> deviations = getDeviations(granularity, startDate, finishDate);
+	public Map<Date, Double> getVariances(TimeGranularity timeGranularity, Date startDate, Date finishDate) {
+		Map<Date, Double> deviations = getDeviations(timeGranularity, startDate, finishDate);
 		Map<Date, Double> variances = new HashMap<Date, Double>(deviations.size());
 		for (Date time : deviations.keySet()) {
 			double deviation = deviations.get(time);
@@ -230,18 +297,18 @@ public class Counter {
 	}
 
 	private Map<Date, Double> queryValues(ValueType valueType,
-	                                      TimeGranularity granularity,
+	                                      TimeGranularity timeGranularity,
 	                                      Date startDate,
 	                                      Date finishDate) {
 		Select select = QueryBuilder.select("time", "value")
 		                            .from(cfName)
 		                            .where(eq("name", name))
 		                            .and(eq("type", valueType.getCode()))
-		                            .and(eq("granularity", granularity.getCode()))
-		                            .and(gte("time", normalizeDate(granularity, startDate)))
-		                            .and(lte("time", normalizeDate(granularity, finishDate)))
+		                            .and(eq("granularity", timeGranularity.getCode()))
+		                            .and(gte("time", normalizeDate(timeGranularity, startDate)))
+		                            .and(lte("time", normalizeDate(timeGranularity, finishDate)))
 		                            .orderBy(asc("type"), asc("granularity"), asc("time"));
-		select.setConsistencyLevel(ConsistencyLevel.QUORUM);
+		select.setConsistencyLevel(consistencyLevel);
 		System.out.println("QUERY: " + select.getQueryString());
 		Map<Date, Double> result = new LinkedHashMap<Date, Double>();
 		for (Row row : session.execute(select)) {
@@ -255,13 +322,13 @@ public class Counter {
 	/**
 	 * Gets the normalized {@link Date} for the specified {@link TimeGranularity} and {@link Date}.
 	 * 
-	 * @param granularity the {@link TimeGranularity}
+	 * @param timeGranularity the {@link TimeGranularity}
 	 * @param date the {@link Date} to be normalized
 	 * @return the normalized {@link Date}
 	 */
-	private Date normalizeDate(TimeGranularity granularity, Date date) {
+	private Date normalizeDate(TimeGranularity timeGranularity, Date date) {
 		DateTime dt = new DateTime(date);
-		switch (granularity) {
+		switch (timeGranularity) {
 		case MINUTELY:
 			return new DateTime(dt.getYear(),
 			                    dt.getMonthOfYear(),
@@ -307,9 +374,9 @@ public class Counter {
 	 * 
 	 */
 	public static enum TimeGranularity {
-		
+
 		ALL("all"), MINUTELY("minutelly"), HOURLY("hourly"), DAILY("daily"), MONTHLY("monthly"), YEARLY("yearly");
-		
+
 		private String code;
 
 		private TimeGranularity(String code) {

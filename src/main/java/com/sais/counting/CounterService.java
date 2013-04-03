@@ -6,6 +6,11 @@ import com.datastax.driver.core.Cluster;
 import com.datastax.driver.core.Cluster.Builder;
 import com.datastax.driver.core.Session;
 
+/**
+ * 
+ * @author apenya
+ *
+ */
 public class CounterService {
 	
 	private String columnFamilyName;
@@ -39,7 +44,7 @@ public class CounterService {
 	 * Gets the {@link Counter} identified by the specified name, regardless of existence.
 	 * 
 	 * @param name the {@link Counter}'s identifying name
-	 * @return the {@link Counter} identified by the specified name
+	 * @return the {@link Counter} identified by the specified name, regardless of existence
 	 */
 	public Counter getCounter(String name) {
 		return new Counter(session, columnFamilyName, name);
