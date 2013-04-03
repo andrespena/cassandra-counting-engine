@@ -1,22 +1,31 @@
 package com.sais.counting;
 
+import static com.datastax.driver.core.querybuilder.QueryBuilder.asc;
+import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
+import static com.datastax.driver.core.querybuilder.QueryBuilder.gte;
+import static com.datastax.driver.core.querybuilder.QueryBuilder.lte;
+
 import java.util.Date;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import org.joda.time.DateTime;
 
 import com.datastax.driver.core.ConsistencyLevel;
+import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.querybuilder.Delete;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
+import com.datastax.driver.core.querybuilder.Select;
 import com.datastax.driver.core.querybuilder.Update;
 
 public class Counter {
 
-	
 	private Session session;
 	private String cfName;
 	private String name;
-	
+
 	/**
 	 * Constructor.
 	 * 
@@ -46,31 +55,26 @@ public class Counter {
 	public String getName() {
 		return name;
 	}
-	
+
 	/**
-	 * Increase this in one unit for the current date.
-	 * 
-	 * @param transaction the atomic {@link Transaction} to be used
+	 * Increase this {@link Counter} in one unit for the current date.
 	 */
 	public void update() {
-		update(new Date(), null);		
+		update(new Date(), null);
 	}
-    
+
 	/**
-	 * Increase this in one unit for the specified date.
+	 * Increase this {@link Counter} in one unit for the specified date.
 	 * 
-	 * @param transaction the atomic {@link Transaction} to be used
-	 * @param date
+	 * @param date the event's date
 	 */
 	public void update(Date date) {
 		update(date, null);
 	}
-    
+
 	/**
-	 * Increase this in one unit for the current date using the specified event
-	 * value for means, deviations and variances.
+	 * Updates the value of this {@link Counter} using the specified value and the current date.
 	 * 
-	 * @param transaction the atomic {@link Transaction} to be used
 	 * @param value the event's value for means, deviations and variances
 	 */
 	public void update(Long value) {
@@ -78,14 +82,12 @@ public class Counter {
 	}
 
 	/**
-	 * Updates the value of this {@link Counter} and of all its ancestors using
-	 * the specified value and date.
+	 * Updates the value of this {@link Counter} using the specified value and date.
 	 * 
-	 * @param transaction the atomic {@link Transaction} to be used
 	 * @param date the event's date
 	 * @param value the event's value for means, deviations and variances
 	 */
-	public void update(Date date, Long value) {			
+	public void update(Date date, Long value) {
 		StringBuilder builder = new StringBuilder();
 		builder.append("BEGIN COUNTER BATCH\n");
 		for (TimeGranularity granularity : TimeGranularity.values()) {
@@ -98,13 +100,13 @@ public class Counter {
 		builder.append("APPLY BATCH;\n");
 		session.execute(builder.toString());
 	}
-	
+
 	private String update(ValueType type, TimeGranularity granularity, Date date, Long value) {
 		Update update = QueryBuilder.update(cfName);
 		update.setConsistencyLevel(ConsistencyLevel.QUORUM);
 		update.where(QueryBuilder.eq("name", name));
 		update.where(QueryBuilder.eq("type", type.getCode()));
-		update.where(QueryBuilder.eq("granularity", mapTimeGranularityName(granularity)));
+		update.where(QueryBuilder.eq("granularity", granularity.getCode()));
 		update.where(QueryBuilder.eq("time", normalizeDate(granularity, date)));
 		update.with(QueryBuilder.incr("value", value));
 		return '\t' + update.getQueryString().replace(';', '\n');
@@ -122,138 +124,169 @@ public class Counter {
 		session.execute(delete);
 	}
 
-//	/*
-//	 * (non-Javadoc)
-//	 * 
-//	 * @see
-//	 * com.g4m3.platform.analytics.Counter#getStats(com.g4m3.platform.analytics
-//	 * .Counter.StatType, com.g4m3.platform.analytics.Counter.TimeGranularity,
-//	 * java.util.Date, java.util.Date)
-//	 */
-//	@Override
-//	public Map<Date, Double> getStats(StatType stat, TimeGranularity granularity, Date start, Date finish) {
-//		switch (stat) {
-//		case COUNTS:
-//			return getCounts(granularity, start, finish);
-//		case SUMS:
-//			return getSums(granularity, start, finish);
-//		case SQUARES:
-//			return getSquares(granularity, start, finish);
-//		case MEANS:
-//			return getMeans(granularity, start, finish);
-//		case DEVIATIONS:
-//			return getDeviations(granularity, start, finish);
-//		case VARIANCES:
-//			return getVariances(granularity, start, finish);
-//		default:
-//			throw new RuntimeException();
-//		}
-//	}
-//
-//	private Map<Date, Double> getCounts(TimeGranularity granularity, Date start, Date finish) {
-//		return queryValues(ValueType.COUNTS, granularity, start, finish);
-//	}
-//
-//	private Map<Date, Double> getSums(TimeGranularity granularity, Date start, Date finish) {
-//		return queryValues(ValueType.SUMS, granularity, start, finish);
-//	}
-//
-//	private Map<Date, Double> getSquares(TimeGranularity granularity, Date start, Date finish) {
-//		return queryValues(ValueType.SQUARES, granularity, start, finish);
-//	}
-//
-//	private Map<Date, Double> getMeans(TimeGranularity granularity, Date start, Date finish) {
-//		Map<Date, Double> counts = getCounts(granularity, start, finish);
-//		Map<Date, Double> sums = getSums(granularity, start, finish);
-//		Map<Date, Double> means = new HashMap<Date, Double>(counts.size());
-//		for (Date time : counts.keySet()) {
-//			double count = counts.get(time);
-//			double sum = sums.get(time);
-//			double mean = sum / count;
-//			means.put(time, mean);
-//		}
-//		return means;
-//	}
-//
-//	private Map<Date, Double> getDeviations(TimeGranularity granularity, Date start, Date finish) {
-//		Map<Date, Double> counts = getCounts(granularity, start, finish);
-//		Map<Date, Double> sums = getSums(granularity, start, finish);
-//		Map<Date, Double> squares = getSquares(granularity, start, finish);
-//		Map<Date, Double> deviations = new HashMap<Date, Double>(counts.size());
-//		for (Date time : counts.keySet()) {
-//			double count = counts.get(time);
-//			double sum = sums.get(time);
-//			double square = squares.get(time);
-//			double deviation = 0.0;
-//			if (count > 1) {
-//				deviation = Math.sqrt((square - sum * sum / count) / (count - 1));
-//			}
-//			deviations.put(time, deviation);
-//		}
-//		return deviations;
-//	}
-//
-//	private Map<Date, Double> getVariances(TimeGranularity granularity, Date start, Date finish) {
-//		Map<Date, Double> deviations = getDeviations(granularity, start, finish);
-//		Map<Date, Double> variances = new HashMap<Date, Double>(deviations.size());
-//		for (Date time : deviations.keySet()) {
-//			double deviation = deviations.get(time);
-//			double variance = deviation * deviation;
-//			variances.put(time, variance);
-//		}
-//		return variances;
-//
-//	}
-//
-//	private Map<Date, Double> queryValues(ValueType valueType, TimeGranularity granularity, Date start, Date finish) {
-//
-//		// Build row key
-//		String rowKey = getRowKey();
-//
-//		// Build range column names
-//		Composite startColName = getColumnName(valueType, granularity, start, true);
-//		Composite finishColName = getColumnName(valueType, granularity, finish, false);
-//
-//		// Setup query
-//		SliceCounterQuery<String, Composite> query = HFactory.createCounterSliceQuery(keyspace, ss, cs);
-//		query.setKey(rowKey);
-//		query.setColumnFamily(cfName);
-//		query.setRange(startColName, finishColName, false, 1000);
-//
-//		// Run query
-//		QueryResult<CounterSlice<Composite>> queryResult = query.execute();
-//
-//		// Parse query
-//		CounterSlice<Composite> counterSlice = queryResult.get();
-//		List<HCounterColumn<Composite>> columns = counterSlice.getColumns();
-//		Map<Date, Double> result = new HashMap<Date, Double>(columns.size());
-//		for (HCounterColumn<Composite> column : columns) {
-//			Composite columnName = column.getName();
-//			Date counterDate = columnName.get(2, das);
-//			Long counterValue = column.getValue();
-//			result.put(counterDate, counterValue.doubleValue());
-//		}
-//
-//		// Return result
-//		return result;
-//	}
-//
-//	/*
-//	 * (non-Javadoc)
-//	 * 
-//	 * @see com.g4m3.platform.analytics.Counter#toString()
-//	 */
-//	@Override
-//	public String toString() {
-//		StringBuilder builder = new StringBuilder();
-//		builder.append(name);
-//		return builder.toString();
-//	}
+	/**
+	 * Gets the map of value counts by date for the specified time granularity and date range.
+	 * 
+	 * @param granularity the time granularity
+	 * @param startDate the date range start, included
+	 * @param finishDate the date range finish, included
+	 * @return the map of value counts by date for the specified time granularity and date range
+	 */
+	public Map<Date, Double> getCounts(TimeGranularity granularity, Date startDate, Date finishDate) {
+		return queryValues(ValueType.COUNTS, granularity, startDate, finishDate);
+	}
+
+	/**
+	 * Gets the map of value sums by date for the specified time granularity and date range.
+	 * 
+	 * @param granularity the time granularity
+	 * @param startDate the date range start, included
+	 * @param finishDate the date range finish, included
+	 * @return the map of value sums by date for the specified time granularity and date range
+	 */
+	public Map<Date, Double> getSums(TimeGranularity granularity, Date startDate, Date finishDate) {
+		return queryValues(ValueType.SUMS, granularity, startDate, finishDate);
+	}
+
+	/**
+	 * Gets the map of value squares by date for the specified time granularity and date range.
+	 * 
+	 * @param granularity the time granularity
+	 * @param startDate the date range start, included
+	 * @param finishDate the date range finish, included
+	 * @return the map of value squares by date for the specified time granularity and date range
+	 */
+	public Map<Date, Double> getSquares(TimeGranularity granularity, Date startDate, Date finishDate) {
+		return queryValues(ValueType.SQUARES, granularity, startDate, finishDate);
+	}
+
+	/**
+	 * Gets the map of value means by date for the specified time granularity and date range.
+	 * 
+	 * @param granularity the time granularity
+	 * @param startDate the date range start, included
+	 * @param finishDate the date range finish, included
+	 * @return the map of value means by date for the specified time granularity and date range
+	 */
+	public Map<Date, Double> getMeans(TimeGranularity granularity, Date startDate, Date finishDate) {
+		Map<Date, Double> counts = getCounts(granularity, startDate, finishDate);
+		Map<Date, Double> sums = getSums(granularity, startDate, finishDate);
+		Map<Date, Double> means = new HashMap<Date, Double>(counts.size());
+		for (Date time : counts.keySet()) {
+			double count = counts.get(time);
+			double sum = sums.get(time);
+			double mean = sum / count;
+			means.put(time, mean);
+		}
+		return means;
+	}
+
+	/**
+	 * Gets the map of value standard deviations by date for the specified time granularity and date
+	 * range.
+	 * 
+	 * @param granularity the time granularity
+	 * @param startDate the date range start, included
+	 * @param finishDate the date range finish, included
+	 * @return the map of value standard deviations by date for the specified time granularity and
+	 *         date range
+	 */
+	public Map<Date, Double> getDeviations(TimeGranularity granularity, Date startDate, Date finishDate) {
+		Map<Date, Double> counts = getCounts(granularity, startDate, finishDate);
+		Map<Date, Double> sums = getSums(granularity, startDate, finishDate);
+		Map<Date, Double> squares = getSquares(granularity, startDate, finishDate);
+		Map<Date, Double> deviations = new HashMap<Date, Double>(counts.size());
+		for (Date time : counts.keySet()) {
+			double count = counts.get(time);
+			double sum = sums.get(time);
+			double square = squares.get(time);
+			double deviation = 0.0;
+			if (count > 1) {
+				deviation = Math.sqrt((square - sum * sum / count) / (count - 1));
+			}
+			deviations.put(time, deviation);
+		}
+		return deviations;
+	}
+
+	/**
+	 * Gets the map of value variances by date for the specified time granularity and date range.
+	 * 
+	 * @param granularity the time granularity
+	 * @param startDate the date range start, included
+	 * @param finishDate the date range finish, included
+	 * @return the map of value variances by date for the specified time granularity and date range
+	 */
+	public Map<Date, Double> getVariances(TimeGranularity granularity, Date startDate, Date finishDate) {
+		Map<Date, Double> deviations = getDeviations(granularity, startDate, finishDate);
+		Map<Date, Double> variances = new HashMap<Date, Double>(deviations.size());
+		for (Date time : deviations.keySet()) {
+			double deviation = deviations.get(time);
+			double variance = deviation * deviation;
+			variances.put(time, variance);
+		}
+		return variances;
+
+	}
+
+	private Map<Date, Double> queryValues(ValueType valueType,
+	                                      TimeGranularity granularity,
+	                                      Date startDate,
+	                                      Date finishDate) {
+		Select select = QueryBuilder.select("time", "value")
+		                            .from(cfName)
+		                            .where(eq("name", name))
+		                            .and(eq("type", valueType.getCode()))
+		                            .and(eq("granularity", granularity.getCode()))
+		                            .and(gte("time", normalizeDate(granularity, startDate)))
+		                            .and(lte("time", normalizeDate(granularity, finishDate)))
+		                            .orderBy(asc("type"), asc("granularity"), asc("time"));
+		select.setConsistencyLevel(ConsistencyLevel.QUORUM);
+		System.out.println("QUERY: " + select.getQueryString());
+		Map<Date, Double> result = new LinkedHashMap<Date, Double>();
+		for (Row row : session.execute(select)) {
+			Date date = row.getDate("time");
+			Long value = row.getLong("value");
+			result.put(date, value.doubleValue());
+		}
+		return result;
+	}
+
+	/**
+	 * Gets the normalized {@link Date} for the specified {@link TimeGranularity} and {@link Date}.
+	 * 
+	 * @param granularity the {@link TimeGranularity}
+	 * @param date the {@link Date} to be normalized
+	 * @return the normalized {@link Date}
+	 */
+	private Date normalizeDate(TimeGranularity granularity, Date date) {
+		DateTime dt = new DateTime(date);
+		switch (granularity) {
+		case MINUTELY:
+			return new DateTime(dt.getYear(),
+			                    dt.getMonthOfYear(),
+			                    dt.getDayOfMonth(),
+			                    dt.getHourOfDay(),
+			                    dt.getMinuteOfHour()).toDate();
+		case HOURLY:
+			return new DateTime(dt.getYear(), dt.getMonthOfYear(), dt.getDayOfMonth(), dt.getHourOfDay(), 0).toDate();
+		case DAILY:
+			return new DateTime(dt.getYear(), dt.getMonthOfYear(), dt.getDayOfMonth(), 0, 0).toDate();
+		case MONTHLY:
+			return new DateTime(dt.getYear(), dt.getMonthOfYear(), 1, 0, 0).toDate();
+		case YEARLY:
+			return new DateTime(dt.getYear(), 1, 1, 0, 0).toDate();
+		case ALL:
+			return new DateTime(0).toDate();
+		default:
+			throw new RuntimeException();
+		}
+	}
 
 	/**
 	 * Enumerated type representing the type of a value.
 	 */
-	private static enum ValueType {
+	public static enum ValueType {
 
 		COUNTS("counts"), SUMS("sums"), SQUARES("squares");
 
@@ -268,67 +301,24 @@ public class Counter {
 		}
 	}
 
-	private String mapTimeGranularityName(TimeGranularity granularity) {
-		switch (granularity) {
-		case ALL:
-			return "all";
-		case MINUTELY:
-			return "minutelly";
-		case HOURLY:
-			return "hourly";
-		case DAILY:
-			return "daily";
-		case MONTHLY:
-			return "monthly";
-		case YEARLY:
-			return "yearly";
-		default:
-			throw new RuntimeException();
-		}
-	}
-
-	private Date normalizeDate(TimeGranularity granularity, Date date) {
-		DateTime dateTime = new DateTime(date);
-		switch (granularity) {
-		case MINUTELY:
-			return new DateTime(dateTime.getYear(),
-			                    dateTime.getMonthOfYear(),
-			                    dateTime.getDayOfMonth(),
-			                    dateTime.getHourOfDay(),
-			                    dateTime.getMinuteOfHour()).toDate();
-		case HOURLY:
-			return new DateTime(dateTime.getYear(),
-			                    dateTime.getMonthOfYear(),
-			                    dateTime.getDayOfMonth(),
-			                    dateTime.getHourOfDay(),
-			                    0).toDate();
-		case DAILY:
-			return new DateTime(dateTime.getYear(), dateTime.getMonthOfYear(), dateTime.getDayOfMonth(), 0, 0).toDate();
-		case MONTHLY:
-			return new DateTime(dateTime.getYear(), dateTime.getMonthOfYear(), 1, 0, 0).toDate();
-		case YEARLY:
-			return new DateTime(dateTime.getYear(), 1, 1, 0, 0).toDate();
-		case ALL:
-			return new DateTime(0).toDate();
-		default:
-			throw new RuntimeException();
-		}
-	}
-
-	/**
-	 * Enumerated type representing the type of a statistical indicator.
-	 */
-	static enum StatType {
-		COUNTS, SUMS, SQUARES, MEANS, DEVIATIONS, VARIANCES;
-	}
-
 	/**
 	 * 
 	 * Enumerated type representing a time's granularity.
 	 * 
 	 */
-	static enum TimeGranularity {
-		ALL, MINUTELY, HOURLY, DAILY, MONTHLY, YEARLY;
+	public static enum TimeGranularity {
+		
+		ALL("all"), MINUTELY("minutelly"), HOURLY("hourly"), DAILY("daily"), MONTHLY("monthly"), YEARLY("yearly");
+		
+		private String code;
+
+		private TimeGranularity(String code) {
+			this.code = code;
+		}
+
+		private String getCode() {
+			return code;
+		}
 	}
 
 }

@@ -9,7 +9,7 @@ CREATE TABLE counts (
   name        varchar,
   type        varchar,
   granularity varchar,
-  time        bigint,
+  time        timestamp,
   value       counter,
   PRIMARY KEY (name, type, granularity, time)
 );

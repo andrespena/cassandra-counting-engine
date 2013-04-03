@@ -1,7 +1,5 @@
 package com.sais.counting;
 
-import java.util.Date;
-
 import org.apache.commons.lang.StringUtils;
 
 import com.datastax.driver.core.Cluster;
@@ -16,9 +14,9 @@ public class CounterService {
 	/**
 	 * Constructor.
 	 * 
-	 * @param hosts
-	 * @param keyspaceName
-	 * @param columnFamilyName
+	 * @param hosts the hosts used as contact points
+	 * @param keyspaceName the keyspace name
+	 * @param columnFamilyName the column family (table) name
 	 */
 	public CounterService(String hosts, String keyspaceName, String columnFamilyName) {
 		if (StringUtils.isBlank(hosts)) {
@@ -38,59 +36,13 @@ public class CounterService {
     }
 	
 	/**
-	 * Gets the counter identified by the specified name.
+	 * Gets the {@link Counter} identified by the specified name, regardless of existence.
 	 * 
 	 * @param name the {@link Counter}'s identifying name
 	 * @return the {@link Counter} identified by the specified name
 	 */
 	public Counter getCounter(String name) {
 		return new Counter(session, columnFamilyName, name);
-	}
-	
-	/**
-	 * Increase the {@link Counter} identified by the specified name in one unit for the current date.
-	 * 
-	 * @param name the {@link Counter}'s identifying name
-	 */
-	public void update(String name) {
-		Counter counter = getCounter(name);
-		counter.update();
-	}
-    
-	/**
-	 * Increase the {@link Counter} identified by the specified name in one unit for the specified date.
-	 * 
-	 * @param name the {@link Counter}'s identifying name
-	 * @param date the event's date
-	 */
-	public void update(String name, Date date) {
-		Counter counter = getCounter(name);
-		counter.update(date);
-	}
-    
-	/**
-	 * Increase the {@link Counter} identified by the specified name in one unit for the current date using the specified event
-	 * value for means, deviations and variances.
-	 * 
-	 * @param name the {@link Counter}'s identifying name
-	 * @param value the event's value for means, deviations and variances
-	 */
-	public void update(String name, Long value) {
-		Counter counter = getCounter(name);
-		counter.update(value);
-	}
-
-	/**
-	 * Updates the value of the {@link Counter} identified by the specified name using
-	 * the specified value and date.
-	 * 
-	 * @param name the {@link Counter}'s identifying name
-	 * @param date the event's date
-	 * @param value the event's value for means, deviations and variances
-	 */
-	public void update(String name, Date date, Long value) {
-		Counter counter = getCounter(name);
-		counter.update(date, value);
 	}
 
 }
