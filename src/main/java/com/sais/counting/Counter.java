@@ -4,6 +4,7 @@ import static com.datastax.driver.core.querybuilder.QueryBuilder.asc;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.gte;
 import static com.datastax.driver.core.querybuilder.QueryBuilder.lte;
+import static com.datastax.driver.core.querybuilder.QueryBuilder.incr;
 
 import java.util.Date;
 import java.util.HashMap;
@@ -31,12 +32,8 @@ public class Counter {
 	private Session session;
 	private String cfName;
 	private String name;
-
-	private static final com.datastax.driver.core.ConsistencyLevel DEFAULT_CONSISTENCY_LEVEL = com.datastax.driver.core.ConsistencyLevel.QUORUM;
-	private com.datastax.driver.core.ConsistencyLevel consistencyLevel = DEFAULT_CONSISTENCY_LEVEL;
-	
-	private static final boolean DEFAULT_SYNCHRONOUS_WRITES = true;
-	private boolean synchronousWrites = DEFAULT_SYNCHRONOUS_WRITES;
+	private ConsistencyLevel consistencyLevel;
+	private WriteSynchronicity writeSynchronicity;
 
 	/**
 	 * Constructor.
@@ -44,8 +41,14 @@ public class Counter {
 	 * @param session the {@link Session} to be used
 	 * @param cfName the column family name
 	 * @param name the counter's name
+	 * @param consistencyLevel the default consistency level to be used
+	 * @param writeSynchronicity the default write synchronicity to be used
 	 */
-	Counter(Session session, String cfName, String name) {
+	Counter(Session session,
+	        String cfName,
+	        String name,
+	        ConsistencyLevel consistencyLevel,
+	        WriteSynchronicity writeSynchronicity) {
 		if (session == null) {
 			throw new IllegalArgumentException("A not null session is required");
 		}
@@ -55,9 +58,51 @@ public class Counter {
 		if (name == null || name.isEmpty()) {
 			throw new IllegalArgumentException("A not null or empty counter name is required");
 		}
+		if (consistencyLevel == null) {
+			throw new IllegalArgumentException("A not null consistency level is required");
+		}
+		if (writeSynchronicity == null) {
+			throw new IllegalArgumentException("A not null write synchronicity is required");
+		}
 		this.session = session;
 		this.cfName = cfName;
 		this.name = name;
+		this.consistencyLevel = consistencyLevel;
+		this.writeSynchronicity = writeSynchronicity;
+	}
+
+	/**
+	 * @return the consistencyLevel
+	 */
+	public ConsistencyLevel getConsistencyLevel() {
+		return consistencyLevel;
+	}
+
+	/**
+	 * @param consistencyLevel the consistencyLevel to set
+	 */
+	public void setConsistencyLevel(ConsistencyLevel consistencyLevel) {
+		if (consistencyLevel == null)
+			throw new IllegalArgumentException("A not null consistency level is required");
+		else
+			this.consistencyLevel = consistencyLevel;
+	}
+
+	/**
+	 * @return the synchronousWrites
+	 */
+	public WriteSynchronicity getWriteSynchronicity() {
+		return writeSynchronicity;
+	}
+
+	/**
+	 * @param writeSynchronicity the synchronousWrites to set
+	 */
+	public void setWriteSynchronicity(WriteSynchronicity writeSynchronicity) {
+		if (writeSynchronicity == null)
+			throw new IllegalArgumentException("A not null write synchronicity is required");
+		else
+			this.writeSynchronicity = writeSynchronicity;
 	}
 
 	/**
@@ -70,48 +115,10 @@ public class Counter {
 	}
 
 	/**
-	 * Sets the consistency level to be used both writings and readings
-	 * 
-	 * @return the consistency level to be used both writings and readings
-	 */
-	public ConsistencyLevel getConsistencyLevel() {
-		return ConsistencyLevel.parseCQLDriverCL(consistencyLevel);
-	}
-
-	/**
-	 * Gets the consistency level to be used both writings and readings.
-	 * 
-	 * @param consistencyLevel the consistency level to be used both writings and readings to set
-	 */
-	public Counter setConsistencyLevel(ConsistencyLevel consistencyLevel) {
-		if (consistencyLevel == null)
-			throw new NullPointerException("Consistency level must be not null");
-		this.consistencyLevel = consistencyLevel.toCQLDriverCL();
-		return this;
-	}
-
-	/**
-	 * Return {@code true} if this is setup for synchronous writes, {@code false} otherwise.
-	 * @return {@code true} if this is setup for synchronous writes, {@code false} otherwise
-	 */
-	public boolean getSynchronousWrites() {
-		return synchronousWrites;
-	}
-
-	/**
-	 * Sets if writes must be synchronous
-	 * @param synchronousWrites if writes must be synchronous
-	 */
-	public Counter setSynchronousWrites(boolean synchronousWrites) {
-		this.synchronousWrites = synchronousWrites;
-		return this;
-	}
-
-	/**
 	 * Increase this {@link Counter} in one unit for the current date.
 	 */
-	public void update() {
-		update(new Date(), null);
+	public void increment() {
+		increment(new Date(), null);
 	}
 
 	/**
@@ -119,8 +126,8 @@ public class Counter {
 	 * 
 	 * @param date the event's date
 	 */
-	public void update(Date date) {
-		update(date, null);
+	public void increment(Date date) {
+		increment(date, null);
 	}
 
 	/**
@@ -128,8 +135,8 @@ public class Counter {
 	 * 
 	 * @param value the event's value for means, deviations and variances
 	 */
-	public void update(Long value) {
-		update(new Date(), value);
+	public void increment(Long value) {
+		increment(new Date(), value);
 	}
 
 	/**
@@ -138,19 +145,19 @@ public class Counter {
 	 * @param date the event's date
 	 * @param value the event's value for means, deviations and variances
 	 */
-	public void update(Date date, Long value) {
+	public void increment(Date date, Long value) {
 		StringBuilder builder = new StringBuilder();
 		builder.append("BEGIN COUNTER BATCH\n");
 		for (TimeGranularity granularity : TimeGranularity.values()) {
-			builder.append(update(ValueType.COUNTS, granularity, date, 1L));
+			builder.append(increment(ValueType.COUNTS, granularity, date, 1L));
 			if (value != null) {
-				builder.append(update(ValueType.SUMS, granularity, date, value));
-				builder.append(update(ValueType.SQUARES, granularity, date, value * value));
+				builder.append(increment(ValueType.SUMS, granularity, date, value));
+				builder.append(increment(ValueType.SQUARES, granularity, date, value * value));
 			}
 		}
 		builder.append("APPLY BATCH;\n");
 		String query = builder.toString();
-		if (synchronousWrites) {
+		if (writeSynchronicity == WriteSynchronicity.SYNCHRONOUS) {
 			session.execute(query);
 		} else {
 			session.executeAsync(query);
@@ -164,14 +171,14 @@ public class Counter {
 	 * @param date the event's date
 	 * @param value the event's value for means, deviations and variances
 	 */
-	private String update(ValueType valueType, TimeGranularity granularity, Date date, Long value) {
+	private String increment(ValueType valueType, TimeGranularity granularity, Date date, Long value) {
 		Update update = QueryBuilder.update(cfName);
-		update.setConsistencyLevel(consistencyLevel);
-		update.where(QueryBuilder.eq("name", name));
-		update.where(QueryBuilder.eq("type", valueType.getCode()));
-		update.where(QueryBuilder.eq("granularity", granularity.getCode()));
-		update.where(QueryBuilder.eq("time", normalizeDate(granularity, date)));
-		update.with(QueryBuilder.incr("value", value));
+		update.setConsistencyLevel(consistencyLevel.toDatastax());
+		update.where(eq("name", name));
+		update.where(eq("type", valueType.getCode()));
+		update.where(eq("granularity", granularity.getCode()));
+		update.where(eq("time", normalizeDate(granularity, date)));
+		update.with(incr("value", value));
 		return '\t' + update.getQueryString().replace(';', '\n');
 	}
 
@@ -182,9 +189,9 @@ public class Counter {
 	 */
 	public void delete() {
 		Delete delete = QueryBuilder.delete().from(cfName);
-		delete.setConsistencyLevel(consistencyLevel);
-		delete.where(QueryBuilder.eq("name", name));
-		if (synchronousWrites) {
+		delete.setConsistencyLevel(consistencyLevel.toDatastax());
+		delete.where(eq("name", name));
+		if (writeSynchronicity == WriteSynchronicity.SYNCHRONOUS) {
 			session.execute(delete);
 		} else {
 			session.executeAsync(delete);
@@ -200,7 +207,7 @@ public class Counter {
 	 * @return the map of value counts by date for the specified time granularity and date range
 	 */
 	public Map<Date, Double> getCounts(TimeGranularity granularity, Date startDate, Date finishDate) {
-		return queryValues(ValueType.COUNTS, granularity, startDate, finishDate);
+		return getValues(ValueType.COUNTS, granularity, startDate, finishDate);
 	}
 
 	/**
@@ -212,7 +219,7 @@ public class Counter {
 	 * @return the map of value sums by date for the specified time granularity and date range
 	 */
 	public Map<Date, Double> getSums(TimeGranularity granularity, Date startDate, Date finishDate) {
-		return queryValues(ValueType.SUMS, granularity, startDate, finishDate);
+		return getValues(ValueType.SUMS, granularity, startDate, finishDate);
 	}
 
 	/**
@@ -224,7 +231,7 @@ public class Counter {
 	 * @return the map of value squares by date for the specified time granularity and date range
 	 */
 	public Map<Date, Double> getSquares(TimeGranularity granularity, Date startDate, Date finishDate) {
-		return queryValues(ValueType.SQUARES, granularity, startDate, finishDate);
+		return getValues(ValueType.SQUARES, granularity, startDate, finishDate);
 	}
 
 	/**
@@ -296,10 +303,10 @@ public class Counter {
 
 	}
 
-	private Map<Date, Double> queryValues(ValueType valueType,
-	                                      TimeGranularity timeGranularity,
-	                                      Date startDate,
-	                                      Date finishDate) {
+	private Map<Date, Double> getValues(ValueType valueType,
+	                                    TimeGranularity timeGranularity,
+	                                    Date startDate,
+	                                    Date finishDate) {
 		Select select = QueryBuilder.select("time", "value")
 		                            .from(cfName)
 		                            .where(eq("name", name))
@@ -308,7 +315,7 @@ public class Counter {
 		                            .and(gte("time", normalizeDate(timeGranularity, startDate)))
 		                            .and(lte("time", normalizeDate(timeGranularity, finishDate)))
 		                            .orderBy(asc("type"), asc("granularity"), asc("time"));
-		select.setConsistencyLevel(consistencyLevel);
+		select.setConsistencyLevel(consistencyLevel.toDatastax());
 		System.out.println("QUERY: " + select.getQueryString());
 		Map<Date, Double> result = new LinkedHashMap<Date, Double>();
 		for (Row row : session.execute(select)) {
@@ -339,10 +346,6 @@ public class Counter {
 			return new DateTime(dt.getYear(), dt.getMonthOfYear(), dt.getDayOfMonth(), dt.getHourOfDay(), 0).toDate();
 		case DAILY:
 			return new DateTime(dt.getYear(), dt.getMonthOfYear(), dt.getDayOfMonth(), 0, 0).toDate();
-		case MONTHLY:
-			return new DateTime(dt.getYear(), dt.getMonthOfYear(), 1, 0, 0).toDate();
-		case YEARLY:
-			return new DateTime(dt.getYear(), 1, 1, 0, 0).toDate();
 		case ALL:
 			return new DateTime(0).toDate();
 		default:
@@ -375,7 +378,7 @@ public class Counter {
 	 */
 	public static enum TimeGranularity {
 
-		ALL("all"), MINUTELY("minutelly"), HOURLY("hourly"), DAILY("daily"), MONTHLY("monthly"), YEARLY("yearly");
+		ALL("all"), MINUTELY("minutelly"), HOURLY("hourly"), DAILY("daily");
 
 		private String code;
 

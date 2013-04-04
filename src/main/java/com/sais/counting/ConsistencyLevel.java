@@ -4,7 +4,7 @@ public enum ConsistencyLevel {
 
 	ANY, ONE, TWO, THREE, QUORUM, ALL, LOCAL_QUORUM, EACH_QUORUM;
 	
-	static ConsistencyLevel parseCQLDriverCL(com.datastax.driver.core.ConsistencyLevel cl) {
+	static ConsistencyLevel parseDatastax(com.datastax.driver.core.ConsistencyLevel cl) {
 		if (cl == null) return ONE;
 		switch (cl) {
 			case ANY: return ANY;
@@ -19,7 +19,7 @@ public enum ConsistencyLevel {
 		throw new AssertionError();
 	}
 	
-	com.datastax.driver.core.ConsistencyLevel toCQLDriverCL() {
+	com.datastax.driver.core.ConsistencyLevel toDatastax() {
 		switch (this) {
 			case ANY: return com.datastax.driver.core.ConsistencyLevel.ANY;
 	        case ONE: return com.datastax.driver.core.ConsistencyLevel.ONE;
